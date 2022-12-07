@@ -7,7 +7,7 @@ import weaviate
 
 
 # Variables
-WEAVIATE_URL    = 'http:///'
+WEAVIATE_URL    = 'http://34.70.144.136'
 BATCH_SIZE      = 100
 SPHERE_DATASET  = '../sphere.100M.jsonl'
 NODE_NAMES      = ['weaviate-0', 'weaviate-1', 'weaviate-2']
