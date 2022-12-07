@@ -347,6 +347,7 @@ class DataObject:
         additional_properties: List[str] = None,
         with_vector: bool = False,
         class_name: Optional[str] = None,
+        node_name: Optional[str] = None,
     ) -> Optional[dict]:
         """
         Get an object as dict.
@@ -409,6 +410,7 @@ class DataObject:
             additional_properties=additional_properties,
             with_vector=with_vector,
             class_name=class_name,
+            node_name=node_name,
         )
 
     def get(
@@ -417,6 +419,7 @@ class DataObject:
         additional_properties: List[str] = None,
         with_vector: bool = False,
         class_name: Optional[str] = None,
+        node_name: Optional[str] = None,
     ) -> List[dict]:
         """
         Gets objects from weaviate, the maximum number of objects returned is 100.
@@ -487,6 +490,9 @@ class DataObject:
 
         if uuid is not None:
             path += "/" + get_valid_uuid(uuid)
+
+        if node_name:
+            params["node_name"] = node_name
 
         try:
             response = self._connection.get(
