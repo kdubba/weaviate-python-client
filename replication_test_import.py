@@ -70,7 +70,7 @@ def prepare_client():
 def import_data(client: weaviate.Client):
     start = time.time()
     c = 0
-    ids_to_query = []
+    # ids_to_query = []
 
     with open(SPHERE_DATASET) as jsonl_file:
         with client.batch as batch:
@@ -89,9 +89,9 @@ def import_data(client: weaviate.Client):
 
                 c += 1
 
-                ids_to_query.append(json_parsed['id'])
-                if c % 100 == 0:
-                    validate_replicated_inserts(ids_to_query, c-100, c)
+                # ids_to_query.append(json_parsed['id'])
+                # if c % 100 == 0:
+                #     validate_replicated_inserts(ids_to_query, c-100, c)
                 
                 del json_parsed
 
