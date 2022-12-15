@@ -8,9 +8,11 @@ import weaviate
 
 
 # Variables
-WEAVIATE_URL    = 'http://34.70.0.229'
+# WEAVIATE_URL    = 'http://34.70.0.229'
+WEAVIATE_URL = 'http://localhost:8080'
 BATCH_SIZE      = 100
-SPHERE_DATASET  = '../sphere.100M.jsonl'
+# SPHERE_DATASET  = '../sphere.100M.jsonl'
+SPHERE_DATASET = './sphere.100M.jsonl'
 NODE_NAMES      = ['weaviate-0', 'weaviate-1', 'weaviate-2']
 
 
@@ -35,16 +37,17 @@ def prepare_client():
             "desiredCount": 1,
             "replicas": 3,
         },
-        "vectorizer": "text2vec-huggingface",
-        "moduleConfig": {
-            "passageModel": "sentence-transformers/facebook-dpr-ctx_encoder-single-nq-base",
-            "queryModel": "sentence-transformers/facebook-dpr-question_encoder-single-nq-base",
-            "options": {
-                "waitForModel": True,
-                "useGPU": True,
-                "useCache": True
-            }
-        },
+        "vectorizer": "none",
+        # "vectorizer": "text2vec-huggingface",
+        # "moduleConfig": {
+        #     "passageModel": "sentence-transformers/facebook-dpr-ctx_encoder-single-nq-base",
+        #     "queryModel": "sentence-transformers/facebook-dpr-question_encoder-single-nq-base",
+        #     "options": {
+        #         "waitForModel": True,
+        #         "useGPU": True,
+        #         "useCache": True
+        #     }
+        # },
         "properties": [
             {
                 "name": "url",
@@ -91,10 +94,10 @@ def import_data(client: weaviate.Client):
                     c += 1
                     del json_parsed
 
-                    if (c % (BATCH_SIZE * 1000)) == 0:
-                        print(f'[{datetime.datetime.now(datetime.timezone.utc)}] Imported: {c}, batch_size: {client.batch.recommended_num_objects}')
-                        print(f'[{datetime.datetime.now(datetime.timezone.utc)}] Imported: {c}, batch_size: {client.batch.recommended_num_objects}', file=f)
-                        gc.collect()
+                    # if (c % (BATCH_SIZE * 1000)) == 0:
+                    print(f'[{datetime.datetime.now(datetime.timezone.utc)}] Imported: {c}, batch_size: {client.batch.recommended_num_objects}')
+                    print(f'[{datetime.datetime.now(datetime.timezone.utc)}] Imported: {c}, batch_size: {client.batch.recommended_num_objects}', file=f)
+                    gc.collect()
 
     end = time.time()
     print('Done in', end - start)
