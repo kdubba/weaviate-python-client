@@ -3,24 +3,25 @@ Connection class definition.
 """
 from __future__ import annotations
 
+import asyncio
 import datetime
 import os
 import time
-
-from requests.exceptions import JSONDecodeError
 from numbers import Real
 from threading import Thread, Event
 from typing import Any, Dict, Tuple, Optional, Union
 
+import httpx
 import requests
-from authlib.integrations.requests_client import OAuth2Session
+from authlib.integrations.httpx_client import AsyncOAuth2Client
+from requests.exceptions import JSONDecodeError
 
 from weaviate.auth import AuthCredentials, AuthClientCredentials
 from weaviate.connect.authentication import _Auth
 from weaviate.exceptions import AuthenticationFailedException, UnexpectedStatusCodeException
 from weaviate.warnings import _Warnings
 
-Session = Union[requests.sessions.Session, OAuth2Session]
+Session = Union[httpx.Client, AsyncOAuth2Client]
 
 
 class BaseConnection:
@@ -123,7 +124,7 @@ class BaseConnection:
                 resp = response.json()
             except JSONDecodeError:
                 _Warnings.auth_cannot_parse_oidc_config(oidc_url)
-                self._session = requests.Session()
+                self._session = httpx.AsyncClient()
                 return
 
             if auth_client_secret is not None:
@@ -140,11 +141,10 @@ class BaseConnection:
                     f""""No login credentials provided. The weaviate instance at {self.url} requires login credential,
                     use argument 'auth_client_secret'."""
                 )
-        elif response.status_code == 404 and auth_client_secret is not None:
-            _Warnings.auth_with_anon_weaviate()
-            self._session = requests.Session()
         else:
-            self._session = requests.Session()
+            if response.status_code == 404 and auth_client_secret is not None:
+                _Warnings.auth_with_anon_weaviate()
+            self._session = httpx.AsyncClient()
 
     def _create_background_token_refresh(self, _auth: Optional[_Auth] = None):
         """Create a background thread that periodically refreshes access and refresh tokens.
@@ -152,6 +152,7 @@ class BaseConnection:
         While the underlying library refreshes tokens, it does not have an internal cronjob that checks every
         X-seconds if a token has expired. If there is no activity for longer than the refresh tokens lifetime, it will
         expire. Therefore, refresh manually shortly before expiration time is up."""
+        assert isinstance(self._session, AsyncOAuth2Client)
         if "refresh_token" not in self._session.token and _auth is None:
             return
 
@@ -173,8 +174,8 @@ class BaseConnection:
                     # client credentials usually does not contain a refresh token => get a new token using the
                     # saved credentials
                     assert _auth is not None
-                    new_session = _auth.get_auth_session()
-                    self._session.token = new_session.fetch_token()
+                    new_session_sync, _ = _auth.get_auth_session()
+                    self._session.token = new_session_sync.fetch_token()
                 time.sleep(max(refresh_time - 5, 1))
 
         demon = Thread(
@@ -193,8 +194,12 @@ class BaseConnection:
             and self._shutdown_background_event is not None
         ):
             self._shutdown_background_event.set()
-        if hasattr(self, "_session"):
-            self._session.close()
+        if hasattr(self, "_session_sync"):
+            async def _close2():
+                async def _close():
+                    await self._session.aclose()
+                await asyncio.gather(_close())
+            asyncio.run(_close2())
 
     def _get_request_header(self) -> dict:
         """
@@ -233,16 +238,15 @@ class BaseConnection:
         requests.ConnectionError
             If the DELETE request could not be made.
         """
+        async def _delete():
+            request_url = self.url + self._api_version_path + path
 
-        request_url = self.url + self._api_version_path + path
-
-        return self._session.delete(
-            url=request_url,
-            json=weaviate_object,
-            headers=self._get_request_header(),
-            timeout=self._timeout_config,
-            proxies=self._proxies,
-        )
+            return await self._session.delete(
+                url=request_url,
+                headers=self._get_request_header(),
+                timeout=self._timeout_config,
+            )
+        return asyncio.run(_delete())
 
     def patch(
         self,
@@ -270,16 +274,17 @@ class BaseConnection:
         requests.ConnectionError
             If the PATCH request could not be made.
         """
+        async def _patch():
+            request_url = self.url + self._api_version_path + path
 
-        request_url = self.url + self._api_version_path + path
-
-        return self._session.patch(
-            url=request_url,
-            json=weaviate_object,
-            headers=self._get_request_header(),
-            timeout=self._timeout_config,
-            proxies=self._proxies,
-        )
+            return await self._session.patch(
+                url=request_url,
+                json=weaviate_object,
+                headers=self._get_request_header(),
+                timeout=self._timeout_config,
+                proxies=self._proxies,
+            )
+        return asyncio.run(_patch())
 
     def post(
         self,
@@ -308,21 +313,23 @@ class BaseConnection:
         requests.ConnectionError
             If the POST request could not be made.
         """
-        request_url = self.url + self._api_version_path + path
+        async def _post():
+            request_url = self.url + self._api_version_path + path
 
-        return self._session.post(
-            url=request_url,
-            json=weaviate_object,
-            headers=self._get_request_header(),
-            timeout=self._timeout_config,
-            proxies=self._proxies,
-        )
+            return await self._session.post(
+                url=request_url,
+                json=weaviate_object,
+                headers=self._get_request_header(),
+                timeout=self._timeout_config,
+                proxies=self._proxies,
+            )
+        return asyncio.run(_post())
 
     def put(
         self,
         path: str,
         weaviate_object: dict,
-    ) -> requests.Response:
+    ) -> httpx.Response:
         """
         Make a PUT request to the Weaviate server instance.
 
@@ -344,18 +351,19 @@ class BaseConnection:
         requests.ConnectionError
             If the PUT request could not be made.
         """
+        async def _put():
+            request_url = self.url + self._api_version_path + path
 
-        request_url = self.url + self._api_version_path + path
+            return await self._session.put(
+                url=request_url,
+                json=weaviate_object,
+                headers=self._get_request_header(),
+                timeout=self._timeout_config,
+                proxies=self._proxies,
+            )
+        asyncio.run(_put())
 
-        return self._session.put(
-            url=request_url,
-            json=weaviate_object,
-            headers=self._get_request_header(),
-            timeout=self._timeout_config,
-            proxies=self._proxies,
-        )
-
-    def get(self, path: str, params: dict = None, external_url: bool = False) -> requests.Response:
+    def get(self, path: str, params: dict = None, external_url: bool = False) -> httpx.Response:
         """Make a GET request.
 
         Parameters
@@ -377,21 +385,30 @@ class BaseConnection:
         requests.ConnectionError
             If the GET request could not be made.
         """
+        async def _get(params: dict = None):
+            if params is None:
+                params = {}
 
-        if params is None:
-            params = {}
+            if external_url:
+                request_url = path
+            else:
+                request_url = self.url + self._api_version_path + path
 
-        if external_url:
-            request_url = path
-        else:
-            request_url = self.url + self._api_version_path + path
+            return await self._session.get(
+                url=request_url,
+                headers=self._get_request_header(),
+                timeout=self._timeout_config,
+                params=params,
+            )
+        return asyncio.run(_get(params))
 
-        return self._session.get(
+    async def head_async(self, path: str) -> httpx.Response:
+        request_url = self.url + self._api_version_path + path
+
+        return await self._session.head(
             url=request_url,
             headers=self._get_request_header(),
             timeout=self._timeout_config,
-            params=params,
-            proxies=self._proxies,
         )
 
     def head(self, path: str) -> requests.Response:
@@ -414,15 +431,15 @@ class BaseConnection:
         requests.ConnectionError
             If the HEAD request could not be made.
         """
+        async def _head():
+            request_url = self.url + self._api_version_path + path
 
-        request_url = self.url + self._api_version_path + path
-
-        return self._session.head(
-            url=request_url,
-            headers=self._get_request_header(),
-            timeout=self._timeout_config,
-            proxies=self._proxies,
-        )
+            return await self._session.head(
+                url=request_url,
+                headers=self._get_request_header(),
+                timeout=self._timeout_config,
+            )
+        return asyncio.run(_head())
 
     @property
     def timeout_config(self) -> Tuple[Real, Real]:

@@ -39,7 +39,7 @@ class TestConnection(unittest.TestCase):
         Test the all requests methods ('get', 'put', 'patch', 'post', 'delete').
         """
 
-        mock_session = mock_requests.Session.return_value = Mock()
+        mock_session = mock_requests.SessionSync.return_value = Mock()
         connection = BaseConnection(
             url="http://weaviate:1234",
             auth_client_secret=None,
@@ -116,7 +116,7 @@ class TestConnection(unittest.TestCase):
 
         # add Proxies
 
-        mock_session = mock_requests.Session.return_value = Mock()
+        mock_session = mock_requests.SessionSync.return_value = Mock()
         connection = BaseConnection(
             url="http://weaviate:1234",
             auth_client_secret=None,

@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 from typing import Dict
 from typing import TYPE_CHECKING
 
 import requests
-from authlib.integrations.requests_client import OAuth2Session
+from authlib.integrations.httpx_client import AsyncOAuth2Client
+from oauthlib.oauth2 import OAuth2Token
 
 from weaviate.auth import (
     AuthCredentials,
@@ -54,7 +56,7 @@ class _Auth:
         response_auth = requests.get(self._open_id_config_url, proxies=self._connection.proxies)
         return response_auth.json()["token_endpoint"]
 
-    def get_auth_session(self) -> OAuth2Session:
+    def get_auth_session(self) -> AsyncOAuth2Client:
         if isinstance(self._auth_config, AuthBearerToken):
             session = self._get_session_auth_bearer_token(self._auth_config)
         elif isinstance(self._auth_config, AuthClientCredentials):
@@ -65,7 +67,7 @@ class _Auth:
 
         return session
 
-    def _get_session_auth_bearer_token(self, config: AuthBearerToken) -> OAuth2Session:
+    def _get_session_auth_bearer_token(self, config: AuthBearerToken) -> AsyncOAuth2Client:
         token = {"access_token": config.access_token}
         if config.expires_in is not None:
             token["expires_in"] = config.expires_in
@@ -76,24 +78,31 @@ class _Auth:
             _Warnings.auth_no_refresh_token(config.expires_in)
 
         # token endpoint and clientId are needed for token refresh
-        return OAuth2Session(
+        session2 = AsyncOAuth2Client(
             token=token, token_endpoint=self._token_endpoint, client_id=self._client_id
         )
+        async def fetch_async_token():
+            await session2.fetch_token()
+        asyncio.run(fetch_async_token())
+        return session2
 
-    def _get_session_user_pw(self, config: AuthClientPassword) -> OAuth2Session:
-        session = OAuth2Session(
+    def _get_session_user_pw(self, config: AuthClientPassword) -> AsyncOAuth2Client:
+        session2 = AsyncOAuth2Client(
             client_id=self._client_id,
             token_endpoint=self._token_endpoint,
             grant_type="password",
             scope=config.scope,
         )
-        token = session.fetch_token(username=config.username, password=config.password)
+        async def fetch_async_token() -> OAuth2Token:
+            return await session2.fetch_token(username=config.username, password=config.password)
+        token = asyncio.run(fetch_async_token())
+
         if "refresh_token" not in token:
             _Warnings.auth_no_refresh_token(token["expires_in"])
 
-        return session
+        return session2
 
-    def _get_session_client_credential(self, config: AuthClientCredentials) -> OAuth2Session:
+    def _get_session_client_credential(self, config: AuthClientCredentials) -> AsyncOAuth2Client:
         if config.scope is not None:
             scope = config.scope
         else:
@@ -102,7 +111,7 @@ class _Auth:
                 scope = self._client_id + "/.default"
             else:
                 raise MissingScopeException
-        session = OAuth2Session(
+        session2 = AsyncOAuth2Client(
             client_id=self._client_id,
             client_secret=config.client_secret,
             token_endpoint_auth_method="client_secret_post",
@@ -112,5 +121,7 @@ class _Auth:
             token={"access_token": None, "expires_in": -100},
         )
         # explicitly fetch tokens. Otherwise, authlib will do it in the background and we might have race-conditions
-        session.fetch_token()
-        return session
+        async def fetch_async_token():
+            await session2.fetch_token()
+        asyncio.run(fetch_async_token())
+        return session2
