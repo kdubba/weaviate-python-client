@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 from typing import Dict
 from typing import TYPE_CHECKING
 
@@ -81,9 +80,6 @@ class _Auth:
         session2 = AsyncOAuth2Client(
             token=token, token_endpoint=self._token_endpoint, client_id=self._client_id
         )
-        async def fetch_async_token():
-            await session2.fetch_token()
-        asyncio.run(fetch_async_token())
         return session2
 
     def _get_session_user_pw(self, config: AuthClientPassword) -> AsyncOAuth2Client:
@@ -93,9 +89,11 @@ class _Auth:
             grant_type="password",
             scope=config.scope,
         )
+
         async def fetch_async_token() -> OAuth2Token:
             return await session2.fetch_token(username=config.username, password=config.password)
-        token = asyncio.run(fetch_async_token())
+
+        token = self._connection._loop.run_until_complete(fetch_async_token())
 
         if "refresh_token" not in token:
             _Warnings.auth_no_refresh_token(token["expires_in"])
@@ -121,7 +119,9 @@ class _Auth:
             token={"access_token": None, "expires_in": -100},
         )
         # explicitly fetch tokens. Otherwise, authlib will do it in the background and we might have race-conditions
+
         async def fetch_async_token():
             await session2.fetch_token()
-        asyncio.run(fetch_async_token())
+
+        self._connection._loop.run_until_complete(fetch_async_token())
         return session2

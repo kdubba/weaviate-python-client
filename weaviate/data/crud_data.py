@@ -714,8 +714,9 @@ class DataObject:
             raise UnexpectedStatusCodeException("Object exists", response)
 
         else:
+
             async def exist_list():
-                async def exist_async(object_id: Union[str, uuid_lib.UUID])->bool:
+                async def exist_async(object_id: Union[str, uuid_lib.UUID]) -> bool:
                     if class_name and is_server_version_14:
                         path = f"/objects/{_capitalize_first_letter(class_name)}/{get_valid_uuid(object_id)}"
                     else:
@@ -726,7 +727,9 @@ class DataObject:
                             path=path,
                         )
                     except RequestsConnectionError as conn_err:
-                        raise RequestsConnectionError("Could not check if object exist.") from conn_err
+                        raise RequestsConnectionError(
+                            "Could not check if object exist."
+                        ) from conn_err
 
                     if resp.status_code == 204:
                         return True
@@ -736,7 +739,8 @@ class DataObject:
 
                 tasks = [exist_async(object_id) for object_id in uuid]
                 return await asyncio.gather(*tasks)
-            return asyncio.run(exist_list())
+
+            return self._connection._loop.run_until_complete(exist_list())
 
     def validate(
         self,

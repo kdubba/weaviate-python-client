@@ -7,14 +7,13 @@ import asyncio
 import datetime
 import os
 import time
+from json import JSONDecodeError
 from numbers import Real
 from threading import Thread, Event
 from typing import Any, Dict, Tuple, Optional, Union
 
 import httpx
-import requests
 from authlib.integrations.httpx_client import AsyncOAuth2Client
-from requests.exceptions import JSONDecodeError
 
 from weaviate.auth import AuthCredentials, AuthClientCredentials
 from weaviate.connect.authentication import _Auth
@@ -97,6 +96,8 @@ class BaseConnection:
 
         self._session: Session
         self._shutdown_background_event: Optional[Event] = None
+        self._loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(self._loop)
         self._create_session(auth_client_secret)
 
     def _create_session(self, auth_client_secret: Optional[AuthCredentials]) -> None:
@@ -110,7 +111,7 @@ class BaseConnection:
             If no authentication credentials provided but the Weaviate server has OpenID configured.
         """
         oidc_url = self.url + self._api_version_path + "/.well-known/openid-configuration"
-        response = requests.get(
+        response = httpx.get(
             oidc_url,
             headers={"content-type": "application/json"},
             timeout=self._timeout_config,
@@ -194,12 +195,14 @@ class BaseConnection:
             and self._shutdown_background_event is not None
         ):
             self._shutdown_background_event.set()
-        if hasattr(self, "_session_sync"):
-            async def _close2():
-                async def _close():
-                    await self._session.aclose()
-                await asyncio.gather(_close())
-            asyncio.run(_close2())
+        if hasattr(self, "_session"):
+
+            async def _close():
+                await self._session.aclose()
+
+            self._loop.run_until_complete(_close())
+        if hasattr(self, "_loop"):
+            self._loop.close()
 
     def _get_request_header(self) -> dict:
         """
@@ -212,47 +215,52 @@ class BaseConnection:
         """
         return self._headers
 
-    def delete(
-        self,
-        path: str,
-        weaviate_object: dict = None,
-    ) -> requests.Response:
+    def delete(self, path: str, weaviate_object: dict = None) -> httpx.Response:
         """
-        Make a DELETE request to the Weaviate server instance.
+         Make a DELETE request to the Weaviate server instance.
 
-        Parameters
-        ----------
-        path : str
-            Sub-path to the Weaviate resources. Must be a valid Weaviate sub-path.
-            e.g. '/meta' or '/objects', without version.
+         Parameters
+         ----------
+         path : str
+             Sub-path to the Weaviate resources. Must be a valid Weaviate sub-path.
+             e.g. '/meta' or '/objects', without version.
         weaviate_object : dict, optional
-            Object is used as payload for DELETE request. By default None.
+             Object is used as payload for DELETE request. By default None.
+         Returns
+         -------
+         httpx.Response
+             The response, if request was successful.
 
-        Returns
-        -------
-        requests.Response
-            The response, if request was successful.
-
-        Raises
-        ------
-        requests.ConnectionError
-            If the DELETE request could not be made.
+         Raises
+         ------
+         httpx.ConnectionError
+             If the DELETE request could not be made.
         """
+
         async def _delete():
             request_url = self.url + self._api_version_path + path
+            if weaviate_object is None:
+                return await self._session.delete(
+                    url=request_url,
+                    headers=self._get_request_header(),
+                    timeout=self._timeout_config,
+                )
+            else:
+                return await self._session.request(
+                    method="DELETE",
+                    url=request_url,
+                    headers=self._get_request_header(),
+                    timeout=self._timeout_config,
+                    json=weaviate_object,
+                )
 
-            return await self._session.delete(
-                url=request_url,
-                headers=self._get_request_header(),
-                timeout=self._timeout_config,
-            )
-        return asyncio.run(_delete())
+        return self._loop.run_until_complete(_delete())
 
     def patch(
         self,
         path: str,
         weaviate_object: dict,
-    ) -> requests.Response:
+    ) -> httpx.Response:
         """
         Make a PATCH request to the Weaviate server instance.
 
@@ -266,14 +274,15 @@ class BaseConnection:
 
         Returns
         -------
-        requests.Response
+        httpx.Response
             The response, if request was successful.
 
         Raises
         ------
-        requests.ConnectionError
+        httpx.ConnectionError
             If the PATCH request could not be made.
         """
+
         async def _patch():
             request_url = self.url + self._api_version_path + path
 
@@ -282,15 +291,15 @@ class BaseConnection:
                 json=weaviate_object,
                 headers=self._get_request_header(),
                 timeout=self._timeout_config,
-                proxies=self._proxies,
             )
-        return asyncio.run(_patch())
+
+        return self._loop.run_until_complete(_patch())
 
     def post(
         self,
         path: str,
         weaviate_object: dict,
-    ) -> requests.Response:
+    ) -> httpx.Response:
         """
         Make a POST request to the Weaviate server instance.
 
@@ -301,18 +310,18 @@ class BaseConnection:
             e.g. '/meta' or '/objects', without version.
         weaviate_object : dict
             Object is used as payload for POST request.
-        external_url: Is an external (non-weaviate) url called
 
         Returns
         -------
-        requests.Response
+        httpx.Response
             The response, if request was successful.
 
         Raises
         ------
-        requests.ConnectionError
+        httpx.ConnectionError
             If the POST request could not be made.
         """
+
         async def _post():
             request_url = self.url + self._api_version_path + path
 
@@ -321,9 +330,9 @@ class BaseConnection:
                 json=weaviate_object,
                 headers=self._get_request_header(),
                 timeout=self._timeout_config,
-                proxies=self._proxies,
             )
-        return asyncio.run(_post())
+
+        return self._loop.run_until_complete(_post())
 
     def put(
         self,
@@ -343,14 +352,15 @@ class BaseConnection:
 
         Returns
         -------
-        requests.Response
+        httpx.Response
             The response, if request was successful.
 
         Raises
         ------
-        requests.ConnectionError
+        httpx.ConnectionError
             If the PUT request could not be made.
         """
+
         async def _put():
             request_url = self.url + self._api_version_path + path
 
@@ -359,9 +369,9 @@ class BaseConnection:
                 json=weaviate_object,
                 headers=self._get_request_header(),
                 timeout=self._timeout_config,
-                proxies=self._proxies,
             )
-        asyncio.run(_put())
+
+        return self._loop.run_until_complete(_put())
 
     def get(self, path: str, params: dict = None, external_url: bool = False) -> httpx.Response:
         """Make a GET request.
@@ -377,14 +387,15 @@ class BaseConnection:
 
         Returns
         -------
-        requests.Response
+        httpx.Response
             The response if request was successful.
 
         Raises
         ------
-        requests.ConnectionError
+        httpx.ConnectionError
             If the GET request could not be made.
         """
+
         async def _get(params: dict = None):
             if params is None:
                 params = {}
@@ -400,7 +411,8 @@ class BaseConnection:
                 timeout=self._timeout_config,
                 params=params,
             )
-        return asyncio.run(_get(params))
+
+        return self._loop.run_until_complete(_get(params))
 
     async def head_async(self, path: str) -> httpx.Response:
         request_url = self.url + self._api_version_path + path
@@ -411,7 +423,7 @@ class BaseConnection:
             timeout=self._timeout_config,
         )
 
-    def head(self, path: str) -> requests.Response:
+    def head(self, path: str) -> httpx.Response:
         """
         Make a HEAD request to the server.
 
@@ -423,14 +435,15 @@ class BaseConnection:
 
         Returns
         -------
-        requests.Response
+        httpx.Response
             The response to the request.
 
         Raises
         ------
-        requests.ConnectionError
+        httpx.ConnectionError
             If the HEAD request could not be made.
         """
+
         async def _head():
             request_url = self.url + self._api_version_path + path
 
@@ -439,7 +452,8 @@ class BaseConnection:
                 headers=self._get_request_header(),
                 timeout=self._timeout_config,
             )
-        return asyncio.run(_head())
+
+        return self._loop.run_until_complete(_head())
 
     @property
     def timeout_config(self) -> Tuple[Real, Real]:
