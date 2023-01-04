@@ -1,12 +1,15 @@
 """
 Batch class definitions.
 """
+import asyncio
 import sys
+import threading
 import time
 import warnings
+from asyncio import QueueEmpty
 from collections import deque
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from numbers import Real
+from threading import Thread, Event
 from typing import Tuple, Callable, Optional, Sequence
 
 from requests import ReadTimeout, Response
@@ -17,7 +20,6 @@ from .requests import BatchRequest, ObjectsBatchRequest, ReferenceBatchRequest
 from ..error_msgs import (
     BATCH_REF_DEPRECATION_NEW_V14_CLS_NS_W,
     BATCH_REF_DEPRECATION_OLD_V14_CLS_NS_W,
-    BATCH_EXECUTOR_SHUTDOWN_W,
 )
 from ..exceptions import UnexpectedStatusCodeException
 from ..util import (
@@ -26,25 +28,6 @@ from ..util import (
     _check_positive_num,
 )
 from ..warnings import _Warnings
-
-
-class BatchExecutor(ThreadPoolExecutor):
-    """
-    Weaviate Batch Executor to run batch requests in separate thread.
-    This class implements an additional method `is_shutdown` that us used my the context manager.
-    """
-
-    def is_shutdown(self) -> bool:
-        """
-        Check if executor is shutdown.
-
-        Returns
-        -------
-        bool
-            Whether the BatchExecutor is shutdown.
-        """
-
-        return self._shutdown
 
 
 class Batch:
@@ -214,7 +197,57 @@ class Batch:
         self._num_workers = 1
 
         # thread pool executor
-        self._executor: Optional[BatchExecutor] = None
+        self._queue_objects: asyncio.Queue = asyncio.Queue()
+        self._queue_refs: asyncio.Queue = asyncio.Queue()
+
+        self._shutdown_background_event: Event = Event()
+        self._thread: threading.Thread
+        self._workers_started: bool = False
+
+    def _start_workers(self):
+        self._workers_started = True
+
+        def workers(event: Event):
+            loop = self._connection._loop
+            # for _ in range(self._num_workers):
+
+            consumers = [
+                asyncio.run_coroutine_threadsafe(self._run_queue(event), loop)
+                for _ in range(self._num_workers)
+            ]
+
+            for _ in range(self._num_workers):
+                consumers[0].done()
+
+            # consumers = [loop.call_soon_threadsafe(self._run_queue(event)) for _ in range(self._num_workers)]
+            # asyncio.gather(*consumers)
+
+        self._thread = Thread(
+            target=workers,
+            args=(self._shutdown_background_event,),
+            daemon=True,
+            name="BackgroundBatchQueue",
+        )
+        self._thread.start()
+
+    async def _run_queue(self, event: Event):
+        while True:
+            try:
+                object_batch = self._queue_objects.get_nowait()
+                print("len(object_batch", len(object_batch), flush=True)
+                await self._send_batch("objects", object_batch)
+            except QueueEmpty:
+                pass
+            try:
+                refs_batch = self._queue_refs.get_nowait()
+                print("len(refs_batch", len(refs_batch), flush=True)
+                await self._send_batch("references", refs_batch)
+            except QueueEmpty:
+                pass
+            if event.is_set() and self._queue_refs.empty() and self._queue_objects.empty():
+                print("Shutdown")
+                return
+            await asyncio.sleep(0.1)
 
     def configure(
         self,
@@ -363,11 +396,8 @@ class Batch:
             self._recommended_num_objects = batch_size
             self._recommended_num_references = batch_size
 
-        if self._num_workers != num_workers:
-            self.flush()
-            self.shutdown()
+        if not self._workers_started:
             self._num_workers = num_workers
-            self.start()
 
         self._auto_create()
         return self
@@ -494,7 +524,7 @@ class Batch:
         if self._batching_type:
             self._auto_create()
 
-    def _create_data(
+    async def _send_batch(
         self,
         data_type: str,
         batch_request: BatchRequest,
@@ -532,8 +562,8 @@ class Batch:
             timeout_count = connection_count = 0
             while True:
                 try:
-                    response = self._connection.post(
-                        path="/batch/" + data_type, weaviate_object=batch_request.get_request_body()
+                    response = await self._connection.post_async(
+                        path="/batch/" + data_type, body=batch_request.get_request_body()
                     )
                 except ReadTimeout as error:
                     batch_request = self._batch_readd_after_timeout(data_type, batch_request)
@@ -564,6 +594,7 @@ class Batch:
             )
             raise ReadTimeout(message) from None
         if response.status_code == 200:
+            print(f"Create {data_type} in batch")
             return response
         raise UnexpectedStatusCodeException(f"Create {data_type} in batch", response)
 
@@ -759,10 +790,14 @@ class Batch:
         if len(self._objects_batch) != 0:
             _Warnings.manual_batching()
 
-            response = self._create_data(
-                data_type="objects",
-                batch_request=self._objects_batch,
+            resp = asyncio.run_coroutine_threadsafe(
+                self._send_batch(
+                    data_type="objects",
+                    batch_request=self._objects_batch,
+                ),
+                self._connection._loop,
             )
+            response = resp.result()
             self._objects_batch = ObjectsBatchRequest()
 
             self._objects_throughput_frame.append(
@@ -854,10 +889,15 @@ class Batch:
         if len(self._reference_batch) != 0:
             _Warnings.manual_batching()
 
-            response = self._create_data(
-                data_type="references",
-                batch_request=self._reference_batch,
+            resp = asyncio.run_coroutine_threadsafe(
+                self._send_batch(
+                    data_type="references",
+                    batch_request=self._reference_batch,
+                ),
+                self._connection._loop,
             )
+            response = resp.result()
+
             self._reference_batch = ReferenceBatchRequest()
 
             self._references_throughput_frame.append(
@@ -871,38 +911,6 @@ class Batch:
 
             return response.json()
         return []
-
-    def _flush_in_thread(
-        self,
-        data_type: str,
-        batch_request: BatchRequest,
-    ) -> Tuple[Optional[Response], int]:
-        """
-        Flush BatchRequest in current thread/process.
-
-        Parameters
-        ----------
-        data_type : str
-            The data type of the BatchRequest, used to save time for not checking the type of the
-            BatchRequest.
-        batch_request : weaviate.batch.BatchRequest
-            Contains all the data objects that should be added in one batch.
-            Note: Should be a sub-class of BatchRequest since BatchRequest
-            is just an abstract class, e.g. ObjectsBatchRequest, ReferenceBatchRequest
-
-        Returns
-        -------
-        Tuple[requests.Response, int]
-            The request response and number of items sent with the BatchRequest as tuple.
-        """
-
-        if len(batch_request) != 0:
-            response = self._create_data(
-                data_type=data_type,
-                batch_request=batch_request,
-            )
-            return response, len(batch_request)
-        return None, 0
 
     def _send_batch_requests(self, force_wait: bool) -> None:
         """
@@ -921,98 +929,21 @@ class Batch:
         force_wait : bool
             Whether to wait on all created tasks even if we do not have `num_workers` tasks created
         """
-        if self._executor is None:
-            self.start()
-        elif self._executor.is_shutdown():
-            warnings.warn(
-                message=BATCH_EXECUTOR_SHUTDOWN_W,
-                category=RuntimeWarning,
-                stacklevel=1,
+        if len(self._objects_batch) > 0:
+            fut = asyncio.run_coroutine_threadsafe(
+                self._queue_objects.put(self._objects_batch), self._connection._loop
             )
-            self.start()
-
-        future = self._executor.submit(
-            self._flush_in_thread,
-            data_type="objects",
-            batch_request=self._objects_batch,
-        )
-
-        self._future_pool.append(future)
+            print("Bef objects", flush=True)
+            fut.result()
+            print("After", len(self._objects_batch), flush=True)
         if len(self._reference_batch) > 0:
-            self._reference_batch_queue.append(self._reference_batch)
+            fut = asyncio.run_coroutine_threadsafe(
+                self._queue_refs.put(self._reference_batch), self._connection._loop
+            )
+            fut.result()
 
         self._objects_batch = ObjectsBatchRequest()
         self._reference_batch = ReferenceBatchRequest()
-
-        if not force_wait and self._num_workers > 1 and len(self._future_pool) < self._num_workers:
-            return
-        timeout_occurred = False
-        for done_future in as_completed(self._future_pool):
-
-            response_objects, nr_objects = done_future.result()
-
-            # handle objects response
-            if response_objects is not None:
-                self._objects_throughput_frame.append(
-                    nr_objects / response_objects.elapsed.total_seconds()
-                )
-                if self._callback:
-                    self._callback(response_objects.json())
-            else:
-                timeout_occurred = True
-
-        if timeout_occurred and self._recommended_num_objects is not None:
-            self._recommended_num_objects = max(self._recommended_num_objects // 2, 1)
-        elif len(self._objects_throughput_frame) != 0 and self._recommended_num_objects is not None:
-            obj_per_second = (
-                sum(self._objects_throughput_frame) / len(self._objects_throughput_frame) * 0.75
-            )
-            self._recommended_num_objects = min(
-                round(obj_per_second * self._creation_time),
-                self._recommended_num_objects + 250,
-            )
-        # Create references after all the objects have been created
-        reference_future_pool = []
-        for reference_batch in self._reference_batch_queue:
-            future = self._executor.submit(
-                self._flush_in_thread,
-                data_type="references",
-                batch_request=reference_batch,
-            )
-            reference_future_pool.append(future)
-
-        timeout_occurred = False
-        for done_future in as_completed(reference_future_pool):
-
-            response_references, nr_references = done_future.result()
-
-            # handle references response
-            if response_references is not None:
-                self._references_throughput_frame.append(
-                    nr_references / response_references.elapsed.total_seconds()
-                )
-                if self._callback:
-                    self._callback(response_references.json())
-            else:
-                timeout_occurred = True
-
-        if timeout_occurred and self._recommended_num_objects is not None:
-            self._recommended_num_references = max(self._recommended_num_references // 2, 1)
-        elif (
-            len(self._references_throughput_frame) != 0
-            and self._recommended_num_references is not None
-        ):
-            ref_per_sec = sum(self._references_throughput_frame) / len(
-                self._references_throughput_frame
-            )
-            self._recommended_num_references = min(
-                round(ref_per_sec * self._creation_time),
-                self._recommended_num_references * 2,
-            )
-
-        self._future_pool = []
-        self._reference_batch_queue = []
-        return
 
     def _auto_create(self) -> None:
         """
@@ -1021,6 +952,8 @@ class Batch:
         when the sum of both objects and references equals batch_size. For dynamic batching it
         creates both batch requests when only one is full.
         """
+        if not self._workers_started:
+            self._start_workers()
 
         # greater or equal in case the self._batch_size is changed manually
         if self._batching_type == "fixed":
@@ -1042,7 +975,35 @@ class Batch:
         Flush both objects and references to the Weaviate server and call the callback function
         if one is provided. (See the docs for `configure` or `__call__` for how to set one.)
         """
+        if not self._workers_started:
+            self._start_workers()
+
         self._send_batch_requests(force_wait=True)
+        self._shutdown_background_event.set()
+        for _ in range(self._num_workers):
+            fut1 = asyncio.run_coroutine_threadsafe(
+                self._queue_refs.put([]), self._connection._loop
+            )
+            fut2 = asyncio.run_coroutine_threadsafe(
+                self._queue_objects.put([]), self._connection._loop
+            )
+            fut1.result()
+            fut2.result()
+
+        print(self._queue_refs.empty())
+
+        async def wait_for_completion():
+            print("Shutdown thread")
+            loop = asyncio.get_event_loop()
+            while len(asyncio.all_tasks(loop=loop)) > 1:
+                await asyncio.sleep(0.1)
+            print(asyncio.all_tasks(loop=loop), flush=True)
+
+        res = asyncio.run_coroutine_threadsafe(wait_for_completion(), self._connection._loop)
+        res.result()
+        print("Before join")
+        self._thread.join()
+        print("After join")
 
     def delete_objects(
         self,
@@ -1388,33 +1349,11 @@ class Batch:
 
         return self._recommended_num_references
 
-    def start(self) -> "Batch":
-        """
-        Start the BatchExecutor if it was closed.
-
-        Returns
-        -------
-        Batch
-            Updated self.
-        """
-
-        if self._executor is None or self._executor.is_shutdown():
-            self._executor = BatchExecutor(max_workers=self._num_workers)
-        return self
-
-    def shutdown(self) -> None:
-        """
-        Shutdown the BatchExecutor.
-        """
-        if not (self._executor is None or self._executor.is_shutdown()):
-            self._executor.shutdown()
-
     def __enter__(self) -> "Batch":
-        return self.start()
+        return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.flush()
-        self.shutdown()
 
     @property
     def creation_time(self) -> Real:

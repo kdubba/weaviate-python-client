@@ -895,7 +895,7 @@ class TestBatch(unittest.TestCase):
         # test status_code == 200, timeout_retries = 0
         mock_connection = mock_connection_func("post", status_code=200)
         batch = Batch(mock_connection)
-        batch._create_data("references", ReferenceBatchRequest())
+        batch._send_batch("references", ReferenceBatchRequest())
         mock_connection.post.assert_called_with(
             path="/batch/references",
             weaviate_object=[],
@@ -907,7 +907,7 @@ class TestBatch(unittest.TestCase):
         mock_connection = mock_connection_func("post", status_code=200)
         batch = Batch(mock_connection)
         batch.timeout_retries = 2
-        batch._create_data("references", ReferenceBatchRequest())
+        batch._send_batch("references", ReferenceBatchRequest())
         mock_connection.post.assert_called_with(
             path="/batch/references",
             weaviate_object=[],
@@ -933,7 +933,7 @@ class TestBatch(unittest.TestCase):
         mock_connection = mock_connection_func("post", side_effect=RequestsConnectionError("Test!"))
         batch = Batch(mock_connection)
         with self.assertRaises(RequestsConnectionError) as error:
-            batch._create_data("objects", ObjectsBatchRequest())
+            batch._send_batch("objects", ObjectsBatchRequest())
         check_error_message(self, error, requests_error_message)
         mock_connection.post.assert_called_with(
             path="/batch/objects",
@@ -946,7 +946,7 @@ class TestBatch(unittest.TestCase):
         batch = Batch(mock_connection)
         batch.timeout_retries = 0
         with self.assertRaises(ReadTimeout) as error:
-            batch._create_data("references", ReferenceBatchRequest())
+            batch._send_batch("references", ReferenceBatchRequest())
         check_startswith_error_message(self, error, read_timeout_error_message("references"))
         mock_connection.post.assert_called_with(
             path="/batch/references",
@@ -959,7 +959,7 @@ class TestBatch(unittest.TestCase):
         mock_connection.timeout_config = (2, 100)
         batch = Batch(mock_connection)
         with self.assertRaises(ReadTimeout) as error:
-            batch._create_data("objects", ObjectsBatchRequest())
+            batch._send_batch("objects", ObjectsBatchRequest())
         check_startswith_error_message(self, error, read_timeout_error_message("objects"))
         mock_connection.post.assert_called_with(
             path="/batch/objects",
@@ -973,7 +973,7 @@ class TestBatch(unittest.TestCase):
         batch = Batch(mock_connection)
         batch.connection_error_retries = 0
         with self.assertRaises(RequestsConnectionError) as error:
-            batch._create_data("references", ReferenceBatchRequest())
+            batch._send_batch("references", ReferenceBatchRequest())
         check_startswith_error_message(self, error, requests_error_message)
         mock_connection.post.assert_called_with(
             path="/batch/references",
@@ -986,7 +986,7 @@ class TestBatch(unittest.TestCase):
         mock_connection.timeout_config = (2, 100)
         batch = Batch(mock_connection)
         with self.assertRaises(RequestsConnectionError) as error:
-            batch._create_data("objects", ObjectsBatchRequest())
+            batch._send_batch("objects", ObjectsBatchRequest())
         check_startswith_error_message(self, error, requests_error_message)
         mock_connection.post.assert_called_with(
             path="/batch/objects",
@@ -1014,7 +1014,7 @@ class TestBatch(unittest.TestCase):
         batch.connection_error_retries = 2
         batch.timeout_retries = 2
         with self.assertRaises(RequestsConnectionError) as error:
-            batch._create_data("objects", ObjectsBatchRequest())
+            batch._send_batch("objects", ObjectsBatchRequest())
         check_startswith_error_message(self, error, requests_error_message)
         mock_connection.post.assert_called_with(
             path="/batch/objects",
@@ -1026,7 +1026,7 @@ class TestBatch(unittest.TestCase):
         mock_connection = mock_connection_func("post", status_code=204)
         batch = Batch(mock_connection)
         with self.assertRaises(UnexpectedStatusCodeException) as error:
-            batch._create_data("references", ReferenceBatchRequest())
+            batch._send_batch("references", ReferenceBatchRequest())
         check_startswith_error_message(self, error, unexpected_error_message("references"))
         mock_connection.post.assert_called_with(
             path="/batch/references",

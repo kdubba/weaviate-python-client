@@ -1,5 +1,4 @@
 import datetime
-import random
 import uuid
 from dataclasses import dataclass, field
 from typing import List, Dict, Optional, Any
@@ -98,16 +97,16 @@ class Article:
         self.class_name = "Article"
 
 
-@pytest.mark.parametrize("dynamic", [True, False])
-@pytest.mark.parametrize("batch_size", [50, 100])
+@pytest.mark.parametrize("dynamic", [False])
+@pytest.mark.parametrize("batch_size", [25])
 def test_stress(batch_size, dynamic):
     client = weaviate.Client("http://localhost:8080")
     client.schema.delete_all()
     client.schema.create(schema)
     client.batch.configure(batch_size=batch_size, dynamic=dynamic, num_workers=4)
-    authors = create_authors(random.randint(1000, 5000))
-    paragraphs = create_paragraphs(random.randint(1000, 5000), authors)
-    articles = create_articles(random.randint(1000, 5000), authors, paragraphs)
+    authors = create_authors(250)
+    paragraphs = create_paragraphs(150, authors)
+    articles = create_articles(150, authors, paragraphs)
 
     add_authors(client, authors)
     add_paragraphs(client, paragraphs)

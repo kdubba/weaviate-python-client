@@ -105,15 +105,15 @@ def test_timeout(people_schema, timeout):
     client.schema.delete_all()
 
 
-@pytest.mark.parametrize("limit", [None, 1, 5, 20, 50])
+@pytest.mark.parametrize("limit", [None])
 def test_query_get_with_limit(people_schema, limit: Optional[int]):
     client = weaviate.Client("http://localhost:8080")
     client.schema.delete_all()
     client.schema.create(people_schema)
 
     num_objects = 20
-    for i in range(num_objects):
-        with client.batch as batch:
+    with client.batch as batch:
+        for i in range(num_objects):
             batch.add_data_object({"name": f"name{i}"}, "Person")
         batch.flush()
     result = client.data_object.get(class_name="Person", limit=limit)

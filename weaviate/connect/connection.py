@@ -98,7 +98,16 @@ class BaseConnection:
         self._shutdown_background_event: Optional[Event] = None
         self._loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self._loop)
+        self._run_loop_forever()
+
         self._create_session(auth_client_secret)
+
+    def _run_loop_forever(self):
+        def run_loop():
+            self._loop.run_forever()
+
+        thread = Thread(target=run_loop, daemon=True, name="RunLoop")
+        thread.start()
 
     def _create_session(self, auth_client_secret: Optional[AuthCredentials]) -> None:
         """Creates a request session.
@@ -195,14 +204,24 @@ class BaseConnection:
             and self._shutdown_background_event is not None
         ):
             self._shutdown_background_event.set()
+        if hasattr(self, "_loop"):
+
+            async def stop():
+                loop = asyncio.get_event_loop()
+                while len(asyncio.all_tasks(loop=self._loop)) > 0:
+                    await asyncio.sleep(0.1)
+
+                loop.stop()
+                loop.close()
+
+            asyncio.run_coroutine_threadsafe(stop(), self._loop)
         if hasattr(self, "_session"):
 
             async def _close():
                 await self._session.aclose()
 
-            self._loop.run_until_complete(_close())
-        if hasattr(self, "_loop"):
-            self._loop.close()
+            res = asyncio.run_coroutine_threadsafe(self._session.aclose(), self._loop)
+            res.result()
 
     def _get_request_header(self) -> dict:
         """
@@ -254,7 +273,8 @@ class BaseConnection:
                     json=weaviate_object,
                 )
 
-        return self._loop.run_until_complete(_delete())
+        fut = asyncio.run_coroutine_threadsafe(_delete(), self._loop)
+        return fut.result(1)
 
     def patch(
         self,
@@ -293,7 +313,18 @@ class BaseConnection:
                 timeout=self._timeout_config,
             )
 
-        return self._loop.run_until_complete(_patch())
+        fut = asyncio.run_coroutine_threadsafe(_patch(), self._loop)
+        return fut.result(1)
+
+    async def post_async(self, path: str, body: dict):
+        request_url = self.url + self._api_version_path + path
+
+        return await self._session.post(
+            url=request_url,
+            json=body,
+            headers=self._get_request_header(),
+            timeout=self._timeout_config,
+        )
 
     def post(
         self,
@@ -332,7 +363,8 @@ class BaseConnection:
                 timeout=self._timeout_config,
             )
 
-        return self._loop.run_until_complete(_post())
+        fut = asyncio.run_coroutine_threadsafe(_post(), self._loop)
+        return fut.result(1)
 
     def put(
         self,
@@ -371,7 +403,8 @@ class BaseConnection:
                 timeout=self._timeout_config,
             )
 
-        return self._loop.run_until_complete(_put())
+        fut = asyncio.run_coroutine_threadsafe(_put(), self._loop)
+        return fut.result(1)
 
     def get(self, path: str, params: dict = None, external_url: bool = False) -> httpx.Response:
         """Make a GET request.
@@ -412,7 +445,8 @@ class BaseConnection:
                 params=params,
             )
 
-        return self._loop.run_until_complete(_get(params))
+        fut = asyncio.run_coroutine_threadsafe(_get(params), self._loop)
+        return fut.result(1)
 
     async def head_async(self, path: str) -> httpx.Response:
         request_url = self.url + self._api_version_path + path
@@ -453,7 +487,8 @@ class BaseConnection:
                 timeout=self._timeout_config,
             )
 
-        return self._loop.run_until_complete(_head())
+        fut = asyncio.run_coroutine_threadsafe(_head(), self._loop)
+        return fut.result(1)
 
     @property
     def timeout_config(self) -> Tuple[Real, Real]:
