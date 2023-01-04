@@ -6,7 +6,6 @@ import sys
 import threading
 import time
 import warnings
-from asyncio import QueueEmpty
 from collections import deque
 from numbers import Real
 from threading import Thread, Event
@@ -209,15 +208,20 @@ class Batch:
 
         def workers(event: Event):
             loop = self._connection._loop
-            # for _ in range(self._num_workers):
 
-            consumers = [
-                asyncio.run_coroutine_threadsafe(self._run_queue(event), loop)
+            tasks = [
+                asyncio.run_coroutine_threadsafe(self._run_queue_obs(event), loop)
                 for _ in range(self._num_workers)
             ]
+            tasks.extend(
+                [
+                    asyncio.run_coroutine_threadsafe(self._run_queue_refs(event), loop)
+                    for _ in range(self._num_workers)
+                ]
+            )
 
-            for _ in range(self._num_workers):
-                consumers[0].done()
+            for task in tasks:
+                task.result()
 
             # consumers = [loop.call_soon_threadsafe(self._run_queue(event)) for _ in range(self._num_workers)]
             # asyncio.gather(*consumers)
@@ -230,22 +234,27 @@ class Batch:
         )
         self._thread.start()
 
-    async def _run_queue(self, event: Event):
+    async def _run_queue_obs(self, event: Event):
         while True:
-            try:
-                object_batch = self._queue_objects.get_nowait()
-                print("len(object_batch", len(object_batch), flush=True)
-                await self._send_batch("objects", object_batch)
-            except QueueEmpty:
-                pass
-            try:
-                refs_batch = self._queue_refs.get_nowait()
-                print("len(refs_batch", len(refs_batch), flush=True)
-                await self._send_batch("references", refs_batch)
-            except QueueEmpty:
-                pass
-            if event.is_set() and self._queue_refs.empty() and self._queue_objects.empty():
-                print("Shutdown")
+            object_batch = await self._queue_objects.get()
+            await self._send_batch("objects", object_batch)
+            if event.is_set() and self._queue_objects.empty():
+                print("Shutdown Objects")
+                return
+
+            await asyncio.sleep(0.1)
+
+    async def _run_queue_refs(self, event: Event):
+        while True:
+            if self._queue_objects.empty():
+                batch = await self._queue_refs.get()
+                response = await self._send_batch("references", batch)
+                a = response.json()
+                self._ref_counter += len(a)
+                print([res["result"] for res in a])
+                b = 5
+            if event.is_set() and self._queue_refs.empty():
+                print("Shutdown refs")
                 return
             await asyncio.sleep(0.1)
 
@@ -594,7 +603,6 @@ class Batch:
             )
             raise ReadTimeout(message) from None
         if response.status_code == 200:
-            print(f"Create {data_type} in batch")
             return response
         raise UnexpectedStatusCodeException(f"Create {data_type} in batch", response)
 
@@ -933,9 +941,7 @@ class Batch:
             fut = asyncio.run_coroutine_threadsafe(
                 self._queue_objects.put(self._objects_batch), self._connection._loop
             )
-            print("Bef objects", flush=True)
             fut.result()
-            print("After", len(self._objects_batch), flush=True)
         if len(self._reference_batch) > 0:
             fut = asyncio.run_coroutine_threadsafe(
                 self._queue_refs.put(self._reference_batch), self._connection._loop
@@ -979,31 +985,23 @@ class Batch:
             self._start_workers()
 
         self._send_batch_requests(force_wait=True)
-        self._shutdown_background_event.set()
-        for _ in range(self._num_workers):
-            fut1 = asyncio.run_coroutine_threadsafe(
-                self._queue_refs.put([]), self._connection._loop
-            )
-            fut2 = asyncio.run_coroutine_threadsafe(
-                self._queue_objects.put([]), self._connection._loop
-            )
-            fut1.result()
-            fut2.result()
 
+        print("Queues empty:")
         print(self._queue_refs.empty())
+        print(self._queue_objects.empty())
 
         async def wait_for_completion():
-            print("Shutdown thread")
+            print("flush")
             loop = asyncio.get_event_loop()
-            while len(asyncio.all_tasks(loop=loop)) > 1:
+            while not self._queue_refs.empty() or not self._queue_objects.empty():
                 await asyncio.sleep(0.1)
             print(asyncio.all_tasks(loop=loop), flush=True)
+            print("Ref", self._queue_refs.empty(), flush=True)
+            print("Obs", self._queue_objects.empty(), flush=True)
 
         res = asyncio.run_coroutine_threadsafe(wait_for_completion(), self._connection._loop)
         res.result()
-        print("Before join")
-        self._thread.join()
-        print("After join")
+        a = 5
 
     def delete_objects(
         self,
@@ -1353,7 +1351,22 @@ class Batch:
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
+        print("In exit")
         self.flush()
+        for _ in range(self._num_workers):
+            fut1 = asyncio.run_coroutine_threadsafe(
+                self._queue_refs.put([]), self._connection._loop
+            )
+            fut2 = asyncio.run_coroutine_threadsafe(
+                self._queue_objects.put([]), self._connection._loop
+            )
+            fut1.result()
+            fut2.result()
+
+        self._shutdown_background_event.set()
+        print("Before join")
+        self._thread.join()
+        print("After join")
 
     @property
     def creation_time(self) -> Real:

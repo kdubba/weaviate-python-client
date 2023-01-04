@@ -204,24 +204,24 @@ class BaseConnection:
             and self._shutdown_background_event is not None
         ):
             self._shutdown_background_event.set()
+        print("shutdown", flush=True)
+
         if hasattr(self, "_loop"):
+            print("Shutdown loop", flush=True)
 
             async def stop():
                 loop = asyncio.get_event_loop()
-                while len(asyncio.all_tasks(loop=self._loop)) > 0:
+                print(asyncio.all_tasks(loop=self._loop), flush=True)
+                while len(asyncio.all_tasks(loop=self._loop)) > 1:
+                    print("inside", flush=True)
                     await asyncio.sleep(0.1)
 
                 loop.stop()
+                if hasattr(self, "_session"):
+                    await self._session.aclose()
                 loop.close()
 
             asyncio.run_coroutine_threadsafe(stop(), self._loop)
-        if hasattr(self, "_session"):
-
-            async def _close():
-                await self._session.aclose()
-
-            res = asyncio.run_coroutine_threadsafe(self._session.aclose(), self._loop)
-            res.result()
 
     def _get_request_header(self) -> dict:
         """
@@ -446,7 +446,7 @@ class BaseConnection:
             )
 
         fut = asyncio.run_coroutine_threadsafe(_get(params), self._loop)
-        return fut.result(1)
+        return fut.result()
 
     async def head_async(self, path: str) -> httpx.Response:
         request_url = self.url + self._api_version_path + path
