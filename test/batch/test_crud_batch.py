@@ -1065,9 +1065,9 @@ class TestBatch(unittest.TestCase):
         )
 
         batch = Batch(mock_connection)
-        with self.assertRaises(TypeError) as error:
+        with self.assertRaises(ValueError) as error:
             batch.consistency_level = 1
-        check_startswith_error_message(self, error, "'1' must be of type ConsistencyLevel.")
+        check_startswith_error_message(self, error, "1 is not a valid ConsistencyLevel")
 
     @patch("weaviate.batch.crud_batch.Batch._auto_create")
     def test_configure_call(self, mock_auto_create):
@@ -1078,9 +1078,9 @@ class TestBatch(unittest.TestCase):
         batch = Batch(mock_connection_func())
         self.check_instance(batch)
         #
-        with self.assertRaises(TypeError) as error:
+        with self.assertRaises(ValueError) as error:
             batch.configure(consistency_level=1)
-        check_startswith_error_message(self, error, "'1' must be of type ConsistencyLevel.")
+        check_startswith_error_message(self, error, "1 is not a valid ConsistencyLevel")
         #######################################################################
         # batching_type: None -> 'fixed'
         return_batch = batch.configure(
@@ -1096,7 +1096,7 @@ class TestBatch(unittest.TestCase):
             creation_time=20.76,
             timeout_retries=2,
             batching_type="fixed",
-            consistency_level=ConsistencyLevel.ALL.name,
+            consistency_level="ALL",
         )
         mock_auto_create.assert_called()
         mock_auto_create.reset_mock()
@@ -1129,6 +1129,7 @@ class TestBatch(unittest.TestCase):
             creation_time=12.5,
             timeout_retries=10,
             dynamic=True,
+            consistency_level="QUORUM",
         )
         self.assertEqual(batch, return_batch)
         self.check_instance(
@@ -1139,6 +1140,7 @@ class TestBatch(unittest.TestCase):
             batching_type=None,
             recom_num_ref=200,  # does not change if not None
             recom_num_obj=200,  # does not change if not None
+            consistency_level=ConsistencyLevel.QUORUM,
         )
         mock_auto_create.assert_not_called()
 

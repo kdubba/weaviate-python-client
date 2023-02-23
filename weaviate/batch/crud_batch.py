@@ -16,7 +16,7 @@ from requests import ReadTimeout, Response
 from requests.exceptions import ConnectionError as RequestsConnectionError
 
 from weaviate.connect import Connection
-from weaviate.data.replication import ConsistencyLevel, name_consistency_level
+from weaviate.data.replication import ConsistencyLevel
 
 from .requests import BatchRequest, ObjectsBatchRequest, ReferenceBatchRequest, BatchResponse
 from ..error_msgs import (
@@ -1475,10 +1475,8 @@ class Batch:
         return self._consistency_level
 
     @consistency_level.setter
-    def consistency_level(self, value: Union[ConsistencyLevel, None]) -> None:
-        if value != None and not isinstance(value, ConsistencyLevel):
-            raise TypeError(f"'{value}' must be of type ConsistencyLevel.")
-        self._consistency_level = value.name if value else None
+    def consistency_level(self, x: Union[ConsistencyLevel, None]) -> None:
+        self._consistency_level = ConsistencyLevel(x).value if x else None
 
     @property
     def recommended_num_objects(self) -> Optional[int]:
