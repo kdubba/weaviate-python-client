@@ -96,7 +96,9 @@ class EmbeddedDB:
             + version
             + "/weaviate-"
             + version
-            + "-linux-"
+            + "-"
+            + platform.system()
+            + "-"
             + machine_type
             + ".tar.gz"
         )
