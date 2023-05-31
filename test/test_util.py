@@ -110,14 +110,8 @@ schema_company = {
     ]
 }
 
-tenants = [
-        {
-            "name": "Tenant1"
-        },
-        {
-            "name": "Tenant2"
-        }
-    ]
+tenants = [{"name": "Tenant1"}, {"name": "Tenant2"}]
+
 
 class TestUtil(unittest.TestCase):
     def test_generate_local_beacon(self):
@@ -249,9 +243,7 @@ class TestUtil(unittest.TestCase):
         self.assertEqual(_get_dict_from_list_object([{"key": "val"}]), [{"key": "val"}])
         # read from file
         path = "/".join(__file__.split("/")[:-1])
-        self.assertEqual(
-            _get_dict_from_list_object(f"{path}/schema/tenants.json"), tenants
-        )
+        self.assertEqual(_get_dict_from_list_object(f"{path}/schema/tenants.json"), tenants)
 
     def test_is_weaviate_object_url(self):
         """

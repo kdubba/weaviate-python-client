@@ -176,6 +176,7 @@ def _get_dict_from_object(object_: Union[str, dict]) -> dict:
         "url or file path as string or schema as dict."
     )
 
+
 def _get_dict_from_list_object(object_: Union[str, dict]) -> dict:
     """
     Takes an object that should describe a dict
@@ -214,6 +215,7 @@ def _get_dict_from_list_object(object_: Union[str, dict]) -> dict:
         "url or file path as string or list."
     )
 
+
 def _get_dict_from_str(object_: str) -> dict:
     if validators.url(object_):
         # Object is URL
@@ -228,6 +230,7 @@ def _get_dict_from_str(object_: str) -> dict:
     # Object is file
     with open(object_, "r") as file:
         return json.load(file)
+
 
 def is_weaviate_object_url(url: str) -> bool:
     """

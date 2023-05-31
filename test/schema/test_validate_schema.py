@@ -202,10 +202,7 @@ class TestSchemaValidation(unittest.TestCase):
             "replicationConfig": {
                 "factor": 1,
             },
-            "multiTenancyConfig": {
-                "enabled": True,
-                "tenantKey": "tenant"
-            }
+            "multiTenancyConfig": {"enabled": True, "tenantKey": "tenant"},
         }
         check_class(max_valid)
         # minimal must contain class key as string

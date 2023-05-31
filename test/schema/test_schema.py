@@ -129,14 +129,11 @@ schema_company_local = {  # NOTE: should be the same as file schema_company.json
     ]
 }
 
-tenants_local = [   # NOTE: should be the same as file tenants.json
-        {
-            "name": "Tenant1"
-        },
-        {
-            "name": "Tenant2"
-        }
-    ]
+tenants_local = [  # NOTE: should be the same as file tenants.json
+    {"name": "Tenant1"},
+    {"name": "Tenant2"},
+]
+
 
 class TestSchema(unittest.TestCase):
     def test_create(self):
@@ -695,7 +692,7 @@ class TestSchema(unittest.TestCase):
 
         schema.create_class_tenants("class", "test/schema/tenants.json")  # with read from file
         mock_create_class_tenants.assert_called_with("class", tenants_local)
-        
+
         tenants_list = [
             {"name", "tenant"},
         ]

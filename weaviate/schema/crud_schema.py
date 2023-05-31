@@ -14,7 +14,12 @@ from weaviate.schema.validate_schema import (
     CLASS_KEYS,
     PROPERTY_KEYS,
 )
-from weaviate.util import _get_dict_from_object, _is_sub_schema, _capitalize_first_letter, _get_dict_from_list_object
+from weaviate.util import (
+    _get_dict_from_object,
+    _is_sub_schema,
+    _capitalize_first_letter,
+    _get_dict_from_list_object,
+)
 
 _PRIMITIVE_WEAVIATE_TYPES_SET = {
     "string",
@@ -824,7 +829,9 @@ class Schema:
         try:
             response = self._connection.post(path=path, weaviate_object=tenants)
         except RequestsConnectionError as conn_err:
-            raise RequestsConnectionError("Classess tenants may not have been created properly.") from conn_err
+            raise RequestsConnectionError(
+                "Classess tenants may not have been created properly."
+            ) from conn_err
         if response.status_code != 200:
             raise UnexpectedStatusCodeException("Create classes tenants", response)
 

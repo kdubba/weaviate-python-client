@@ -91,6 +91,7 @@ def test_schema_keys(client: weaviate.Client):
     client.schema.create_class(single_class)
     assert client.schema.exists("Author")
 
+
 def test_class_tenants(client: weaviate.Client):
     class_name = "MultiTenancy"
     single_class = {
@@ -101,15 +102,10 @@ def test_class_tenants(client: weaviate.Client):
                 "name": "author",
             }
         ],
-        "multiTenancyConfig": {
-            "enabled": True,
-            "tenantKey": "author"
-        },
+        "multiTenancyConfig": {"enabled": True, "tenantKey": "author"},
     }
     client.schema.create_class(single_class)
     assert client.schema.exists(class_name)
-    
-    tenants = [
-        {"name": "Tenant1"}, {"name": "Tenant2"}, {"name": "Tenant3"}, {"name": "Tenant4"}
-    ]
+
+    tenants = [{"name": "Tenant1"}, {"name": "Tenant2"}, {"name": "Tenant3"}, {"name": "Tenant4"}]
     client.schema.create_class_tenants(class_name, tenants)
