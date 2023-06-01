@@ -664,3 +664,117 @@ def test_beacon_refs_nested():
 
     assert result["data"]["Get"]["D"][0]["refC"][0]["refB"][0]["refA"][0]["nonRef"] == "A"
     assert result["data"]["Get"]["D"][0]["refB"][0]["refA"][0]["nonRef"] == "A"
+
+
+def test_tenants():
+    client = weaviate.Client("http://localhost:8080")
+    client.schema.delete_all()
+    class_name = "Passage"
+    client.schema.create_class(
+        {
+            "class": class_name,
+            "properties": [
+                {"name": "tenant", "dataType": ["text"]},
+                {"name": "content", "dataType": ["text"]},
+            ],
+            "vectorizer": "text2vec-contextionary",
+            "multiTenancyConfig": {"enabled": True, "tenantKey": "tenant"},
+        }
+    )
+
+    tenants = [
+        {"name": "tenantA"},
+        {"name": "tenantB"},
+        {"name": "tenantC"},
+    ]
+    client.schema.create_class_tenants(
+        class_name=class_name,
+        tenants=tenants,
+    )
+
+    passage_uuids = [
+        "00000000-0000-0000-0000-000000000001",
+        "00000000-0000-0000-0000-000000000002",
+        "00000000-0000-0000-0000-000000000003",
+    ]
+    txts = [
+        "A generative adversarial network (GAN) is a class of machine learning frameworks designed "
+        + "by Ian Goodfellow and his colleagues in June 2014.",
+        "OpenAI is an American artificial intelligence (AI) research laboratory consisting of the non-profit "
+        + "OpenAI Incorporated and its for-profit subsidiary corporation OpenAI Limited Partnership.",
+        "The Space Exploration Technologies Corporation, commonly referred to as SpaceX is an American "
+        + "spacecraft manufacturer, launcher, and satellite communications company headquartered in Hawthorne, California.",
+    ]
+    for i in range(0, len(passage_uuids)):
+        client.data_object.create(
+            class_name=class_name,
+            uuid=passage_uuids[i],
+            data_object={
+                "content": txts[i],
+                "tenant": tenants[i]["name"],
+            },
+            tenant_key=tenants[i]["name"],
+        )
+
+    for i in range(0, len(passage_uuids)):
+        passage = client.data_object.get_by_id(
+            class_name=class_name,
+            uuid=passage_uuids[i],
+            tenant_key=tenants[i]["name"],
+        )
+        assert passage["properties"]["tenant"] == tenants[i]["name"]
+        assert passage["properties"]["content"] == txts[i]
+
+    for i in range(0, len(passage_uuids)):
+        client.data_object.replace(
+            class_name=class_name,
+            uuid=passage_uuids[i],
+            data_object={
+                "content": txts[len(txts) - i - 1],
+                "tenant": tenants[i]["name"],
+            },
+            tenant_key=tenants[i]["name"],
+        )
+
+    for i in range(0, len(passage_uuids)):
+        passage = client.data_object.get_by_id(
+            class_name=class_name,
+            uuid=passage_uuids[i],
+            tenant_key=tenants[i]["name"],
+        )
+        assert passage["properties"]["tenant"] == tenants[i]["name"]
+        assert passage["properties"]["content"] == txts[len(txts) - i - 1]
+
+    for i in range(0, len(passage_uuids)):
+        client.data_object.update(
+            class_name=class_name,
+            uuid=passage_uuids[i],
+            data_object={
+                "content": tenants[i]["name"],
+            },
+            tenant_key=tenants[i]["name"],
+        )
+
+    for i in range(0, len(passage_uuids)):
+        passage = client.data_object.get_by_id(
+            class_name=class_name,
+            uuid=passage_uuids[i],
+            tenant_key=tenants[i]["name"],
+        )
+        assert passage["properties"]["tenant"] == tenants[i]["name"]
+        assert passage["properties"]["content"] == tenants[i]["name"]
+
+    for i in range(0, len(passage_uuids)):
+        client.data_object.delete(
+            class_name=class_name,
+            uuid=passage_uuids[i],
+            tenant_key=tenants[i]["name"],
+        )
+
+    for i in range(0, len(passage_uuids)):
+        passage = client.data_object.get_by_id(
+            class_name=class_name,
+            uuid=passage_uuids[i],
+            tenant_key=tenants[i]["name"],
+        )
+        assert passage is None
