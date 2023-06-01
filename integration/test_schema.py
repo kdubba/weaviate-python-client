@@ -83,6 +83,8 @@ def test_schema_keys(client: weaviate.Client):
         "class": "Author",
         "properties": [
             {
+                "indexFilterable": False,
+                "indexSearchable": False,
                 "dataType": ["text"],
                 "name": "name",
             }
