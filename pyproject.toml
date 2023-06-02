@@ -11,6 +11,11 @@ build-backend = 'setuptools.build_meta'
 [tool.poetry.dependencies]
 requests = "^2.31.0"
 
+[tool.poetry]
+name = "weaviate-python-client"
+version = "3.19.2"
+
+
 [tool.black]
 line-length = 100
 include = '\.pyi?$'
